@@ -1,0 +1,50 @@
+# Docker-Compose-Konfiguration: richtet die komplette Anwendung in Containern ein.
+#   - "db"  : PostgreSQL-Datenbank, die beim ersten Start automatisch das
+#             Schema samt Beispieldaten aus BuchVerwaltungPostgres.sql lädt.
+#   - "web" : die ASP.NET-Core-MVC-Anwendung (siehe Dockerfile).
+#
+# Start:  docker compose up --build
+# Aufruf: http://localhost:8080
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: buchverwaltung-db
+    environment:
+      POSTGRES_DB: buchdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      # Init-Skript wird beim ersten Start automatisch ausgeführt.
+      - ./BuchVerwaltungPostgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      # Persistente Ablage der Datenbankdateien.
+      - buchdb-data:/var/lib/postgresql/data
+    healthcheck:
+      # Die Web-App startet erst, wenn die Datenbank Verbindungen annimmt.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d buchdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  web:
+    build:
+      context: .
+      dockerfile: src/BuchVerwaltung.Web/Dockerfile
+    container_name: buchverwaltung-web
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      # Verbindungsstring per Umgebungsvariable (überschreibt appsettings.json).
+      # Innerhalb des Compose-Netzwerks ist die Datenbank unter "db" erreichbar.
+      ConnectionStrings__BuchDb: "Host=db;Port=5432;Database=buchdb;Username=postgres;Password=postgres"
+    ports:
+      - "8080:8080"
+
+volumes:
+  buchdb-data:
